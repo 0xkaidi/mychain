@@ -29,6 +29,7 @@ const (
 type Blockchain struct {
 	Blocks     []*Block
 	Difficulty int
+	path       string
 	mu         sync.Mutex
 }
 
@@ -49,13 +50,13 @@ func NewBlock(data []string, prevHash string, Difficulty int) *Block {
 	return &nb
 }
 
-func NewBlockchain(difficulty int) *Blockchain {
+func NewBlockchain(difficulty int, path string) *Blockchain {
 	fb := NewBlock([]string{"Genesis Block"}, genesisPrevHash, difficulty)
-	bc := &Blockchain{Blocks: []*Block{fb}, Difficulty: difficulty}
+	bc := &Blockchain{Blocks: []*Block{fb}, Difficulty: difficulty, path: path}
 	return bc
 }
 
-func (bc *Blockchain) AddBlock(data []string, path string) *Block {
+func (bc *Blockchain) AddBlock(data []string) *Block {
 	for {
 		bc.mu.Lock()
 		lbh := bc.Blocks[len(bc.Blocks)-1].Hash
@@ -70,7 +71,7 @@ func (bc *Blockchain) AddBlock(data []string, path string) *Block {
 		}
 		bc.Blocks = append(bc.Blocks, nb)
 		bc.mu.Unlock()
-		if err := bc.SaveToFile(path); err != nil {
+		if err := bc.SaveToFile(); err != nil {
 			log.Println("save failed:", err)
 		}
 		return nb
@@ -129,7 +130,7 @@ type ValidResponse struct {
 	Valid bool `json:"valid"`
 }
 
-func (bc *Blockchain) SaveToFile(path string) error {
+func (bc *Blockchain) SaveToFile() error {
 	bc.mu.Lock()
 	bs := append([]*Block(nil), bc.Blocks...)
 	d := bc.Difficulty
@@ -139,7 +140,7 @@ func (bc *Blockchain) SaveToFile(path string) error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(path, b, 0o644)
+	err = os.WriteFile(bc.path, b, 0o644)
 	return err
 }
 
@@ -170,8 +171,8 @@ func main() {
 	}
 	if bc == nil {
 		log.Println("no chain file, creating genesis")
-		bc = NewBlockchain(5)
-		if err := bc.SaveToFile(chainFilePath); err != nil {
+		bc = NewBlockchain(5, chainFilePath)
+		if err := bc.SaveToFile(); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -202,7 +203,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(bc.AddBlock(req.Data, chainFilePath))
+		json.NewEncoder(w).Encode(bc.AddBlock(req.Data))
 	})
 
 	mux.HandleFunc("/valid", func(w http.ResponseWriter, r *http.Request) {
