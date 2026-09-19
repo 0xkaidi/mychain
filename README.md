@@ -1,6 +1,6 @@
 # mychain
 
-用 Go 实现的一个简单区块链：支持转账交易、待打包交易池、工作量证明（PoW）和 HTTP 接口。
+用 Go 实现的一个简单区块链：支持转账交易、待打包交易池、工作量证明（PoW）、HTTP 接口和命令行工具。
 
 ## 功能
 
@@ -12,11 +12,13 @@
 - 余额查询，支持把未确认交易计入余额
 - 链数据持久化到 `mychain.json`，启动时校验链的完整性，非法则拒绝启动
 - 并发安全（`sync.Mutex`），落盘失败会回滚区块并把交易退回交易池
+- 命令行工具 `cmd/cli`，通过 HTTP 调用节点接口
 
 ## 目录结构
 
 ```
 main.go                  加载链、启动 HTTP 服务
+cmd/cli/main.go          命令行工具
 internal/chain/block.go  区块结构、哈希计算、挖矿
 internal/chain/chain.go  链逻辑：交易池、提交交易、挖矿、余额、校验
 internal/chain/store.go  读写 mychain.json
@@ -25,11 +27,46 @@ internal/api/handler.go  HTTP 接口
 
 ## 运行
 
+启动节点：
+
 ```bash
-go run main.go
+go run .
 ```
 
 默认监听 `:8080`。首次启动会自动创建创世区块（难度 5，含一笔 `"" → genesis` 的 1000 初始交易）并写入 `mychain.json`。
+
+编译（含 CLI）：
+
+```bash
+go build -o mychain .            # 节点
+go build -o mychain-cli ./cmd/cli # 命令行工具
+```
+
+## 命令行工具
+
+CLI 需要节点已在 `http://localhost:8080` 运行，输出为接口返回的原始 JSON，出错时打印原因并以状态码 1 退出。
+
+```bash
+# 也可以用 go run ./cmd/cli 代替 ./mychain-cli
+./mychain-cli valid                        # 校验链是否有效
+./mychain-cli blocks                       # 查看全部区块
+./mychain-cli balance <address>            # 查询余额（含未确认交易）
+./mychain-cli send <from> <to> <amount>    # 提交交易到交易池
+./mychain-cli mine                         # 挖矿，打包交易池中的交易
+```
+
+例如：
+
+```bash
+./mychain-cli balance genesis
+# {"balance":1000}
+
+./mychain-cli send genesis alice 300
+# {"status":"accepted"}
+
+./mychain-cli mine
+# {"prev_block_hash":"00000dff...","transactions":[{"from":"genesis","to":"alice","amount":300}],...}
+```
 
 ## 接口
 
@@ -79,3 +116,4 @@ curl http://localhost:8080/valid
 - 链数据保存在 `mychain.json`（已在 `.gitignore` 中忽略），删除该文件即可重新生成。
 - 交易池只存在内存中，重启后未打包的交易会丢失（已确认的区块不受影响）。
 - 区块哈希 = `sha256(prev_block_hash|timestamp|transactions|nonce)`，其中 `transactions` 为交易的 JSON 编码。
+- CLI 的服务端地址目前硬编码在 `cmd/cli/main.go` 的 `baseURL`。
