@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-type Tx struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Amount int    `json:"amount"`
-}
-
 type Block struct {
 	PrevBlockHash string `json:"prev_block_hash"`
 	Timestamp     int64  `json:"timestamp"`

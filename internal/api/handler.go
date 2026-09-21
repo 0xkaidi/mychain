@@ -11,6 +11,10 @@ type ValidResponse struct {
 	Valid bool `json:"valid"`
 }
 
+type MineRequest struct {
+	Miner string `json:"miner"`
+}
+
 func handleBlocks(bc *chain.Blockchain) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -29,7 +33,13 @@ func handleMine(bc *chain.Blockchain) http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		b, err := bc.MinePending()
+		defer r.Body.Close()
+		var req MineRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		b, err := bc.Mine(req.Miner)
 		if err != nil {
 			http.Error(w, "mine failed", http.StatusBadRequest)
 			return

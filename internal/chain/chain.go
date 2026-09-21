@@ -2,7 +2,6 @@ package chain
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -10,6 +9,7 @@ import (
 
 const (
 	genesisPrevHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	MiningReward    = 50
 )
 
 type Blockchain struct {
@@ -87,6 +87,25 @@ func (bc *Blockchain) IsValid() bool {
 			return false
 		}
 	}
+
+	for i, b := range bc.Blocks {
+		if i == 0 {
+			continue
+		}
+		coinbaseCount := 0
+		for _, tx := range b.Transactions {
+			if tx.From == "" {
+				coinbaseCount++
+				if tx.Amount != MiningReward {
+					return false
+				}
+			}
+		}
+		if coinbaseCount > 1 {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -161,6 +180,18 @@ func (bc *Blockchain) SubmitTx(tx Tx) error {
 	if tx.From == "" {
 		return errors.New("from cant be empty")
 	}
+	if tx.PubKey == "" {
+		return errors.New("pub key cant be empty")
+	}
+	if tx.Signature == "" {
+		return errors.New("signature cant be empty")
+	}
+	if Address([]byte(tx.PubKey)) != tx.From {
+		return errors.New("pub key and address does not match")
+	}
+	if err := tx.VerifySignature(); err != nil {
+		return err
+	}
 	if bc.balanceWithPendingLocked(tx.From) < tx.Amount {
 		return errors.New("insufficient balance")
 	}
@@ -168,16 +199,16 @@ func (bc *Blockchain) SubmitTx(tx Tx) error {
 	return nil
 }
 
-func (bc *Blockchain) MinePending() (*Block, error) {
+func (bc *Blockchain) Mine(miner string) (*Block, error) {
 	bc.mu.Lock()
-	if len(bc.Pending) == 0 {
-		bc.mu.Unlock()
-		return nil, fmt.Errorf("no pending")
-	}
 	tx := append([]Tx(nil), bc.Pending...)
 	bc.Pending = nil
 	bc.mu.Unlock()
-	b, err := bc.addBlock(tx)
+
+	coinbase := Tx{From: "", To: miner, Amount: MiningReward}
+	allTx := append(tx, coinbase)
+
+	b, err := bc.addBlock(allTx)
 	if err != nil {
 		bc.mu.Lock()
 		bc.Pending = append(bc.Pending, tx...)
