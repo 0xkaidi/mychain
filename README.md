@@ -4,14 +4,14 @@
 
 ## 功能
 
-- 钱包：ECDSA P-256 密钥对，私钥以 PEM 保存，地址 = `sha256(pubkey hex)`
+- 钱包：ECDSA P-256 密钥对，私钥以 PEM 保存，地址 = `sha256(未压缩公钥字节)`
 - 交易签名与验签：交易体（from/to/amount/pubkey）经 SHA-256 后用 ECDSA 签名
-- 提交交易时校验：`from`/`pub_key`/`signature` 非空、公钥与地址匹配、签名有效、余额充足（含未确认交易）
+- 提交交易时校验：`from`/`pub_key`/`signature` 非空、公钥十六进制可解析且与 `from` 地址匹配、签名有效、余额充足（含未确认交易）
 - 待打包交易池：交易先提交到 `Pending`，挖矿时整批打包
 - 挖矿奖励：每个区块附带一笔 50 的 coinbase 交易给矿工
-- SHA-256 计算区块哈希，通过前导零数量控制难度（默认 5）
+- SHA-256 计算区块哈希，通过前导零数量控制难度（固定为 5）
 - 余额查询，支持把未确认交易计入余额
-- 链数据持久化到 `mychain.json`，启动时校验链的完整性（含 coinbase 规则），非法则拒绝启动
+- 链数据持久化到 `mychain.json`，启动时完整校验：创世块、区块哈希与难度、每块恰好一笔 50 的 coinbase、每笔普通交易的地址/签名/余额，非法则拒绝启动
 - 并发安全（`sync.Mutex`），落盘失败会回滚区块并把交易退回交易池
 - 命令行工具 `cmd/cli`，通过 HTTP 调用节点接口
 
@@ -139,4 +139,6 @@ curl http://localhost:8080/valid
 - 交易池只存在内存中，重启后未打包的交易会丢失（已确认的区块不受影响）。
 - 区块哈希 = `sha256(prev_block_hash|timestamp|transactions|nonce)`，其中 `transactions` 为交易的 JSON 编码。
 - 创世区块中 1000 的初始余额记在字面地址 `genesis` 名下，没有对应私钥，因此无法花掉；新币只能通过挖矿奖励产生。
+- 地址是对未压缩 SEC1 公钥字节做 `sha256` 后的十六进制；节点用它校验交易的 `from` 与 `pub_key` 是否匹配。
+- 难度是常量 `chain.Difficulty = 5`，`mychain.json` 中记录的难度与之不一致时链会被判为非法。
 - CLI 的服务端地址目前硬编码在 `cmd/cli/main.go` 的 `baseURL`。
