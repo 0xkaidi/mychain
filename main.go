@@ -15,7 +15,7 @@ func main() {
 	}
 	if bc == nil {
 		log.Println("no chain file, creating genesis")
-		bc = chain.NewBlockchain(5, chain.ChainFilePath)
+		bc = chain.NewBlockchain(chain.Difficulty, chain.ChainFilePath)
 		if err := chain.SaveToFile(bc); err != nil {
 			log.Fatal(err)
 		}

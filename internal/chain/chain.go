@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"encoding/hex"
 	"errors"
 	"log"
 	"strings"
@@ -10,6 +11,7 @@ import (
 const (
 	genesisPrevHash = "0000000000000000000000000000000000000000000000000000000000000000"
 	MiningReward    = 50
+	Difficulty      = 5
 )
 
 type Blockchain struct {
@@ -58,22 +60,25 @@ func (bc *Blockchain) addBlock(tx []Tx) (*Block, error) {
 	}
 }
 
-func (bc *Blockchain) IsValid() bool {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	if len(bc.Blocks) == 0 {
-		return false
-	}
+func (bc *Blockchain) isValidGenesisLocked() bool {
 	if bc.Blocks[0].PrevBlockHash != genesisPrevHash {
 		return false
 	}
 	if bc.Blocks[0].Hash != bc.Blocks[0].CalculateHash() {
 		return false
 	}
+	if bc.Difficulty != Difficulty {
+		return false
+	}
 	target := strings.Repeat("0", bc.Difficulty)
 	if !strings.HasPrefix(bc.Blocks[0].Hash, target) {
 		return false
 	}
+	return true
+}
+
+func (bc *Blockchain) isValidHashesLocked() bool {
+	target := strings.Repeat("0", bc.Difficulty)
 	for i := 1; i < len(bc.Blocks); i++ {
 		cur := bc.Blocks[i]
 		prev := bc.Blocks[i-1]
@@ -87,68 +92,79 @@ func (bc *Blockchain) IsValid() bool {
 			return false
 		}
 	}
-
-	for i, b := range bc.Blocks {
-		if i == 0 {
-			continue
-		}
-		coinbaseCount := 0
-		for _, tx := range b.Transactions {
-			if tx.From == "" {
-				coinbaseCount++
-				if tx.Amount != MiningReward {
-					return false
-				}
-			}
-		}
-		if coinbaseCount > 1 {
-			return false
-		}
-	}
-
 	return true
 }
 
-func (bc *Blockchain) Balance(addr string) int {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	balance := 0
-	for _, b := range bc.Blocks {
+func (bc *Blockchain) isValidTransactionsLocked() bool {
+	balances := make(map[string]int)
+	for i, b := range bc.Blocks {
+		coinbaseCount := 0
 		for _, tx := range b.Transactions {
-			if tx.To == addr {
-				balance += tx.Amount
-			}
-			if tx.From != "" && tx.From == addr {
-				balance -= tx.Amount
+			if tx.From == "" {
+				// coinbase
+				coinbaseCount++
+				if i > 0 && tx.Amount != MiningReward {
+					return false
+				}
+				if tx.To == "" {
+					return false
+				}
+				balances[tx.To] += tx.Amount
+			} else {
+				// 普通交易
+				if tx.PubKey == "" || tx.Signature == "" {
+					return false
+				}
+				pubKeyBytes, err := hex.DecodeString(tx.PubKey)
+				if err != nil {
+					return false
+				}
+				if Address(pubKeyBytes) != tx.From {
+					return false
+				}
+				if err := tx.VerifySignature(); err != nil {
+					return false
+				}
+				if balances[tx.From] < tx.Amount {
+					return false
+				}
+				balances[tx.From] -= tx.Amount
+				balances[tx.To] += tx.Amount
 			}
 		}
+		if i > 0 && coinbaseCount != 1 {
+			return false
+		}
 	}
-	return balance
+	return true
+}
+
+func (bc *Blockchain) isValidLocked() bool {
+	if len(bc.Blocks) == 0 {
+		return false
+	}
+	if !bc.isValidGenesisLocked() {
+		return false
+	}
+	if !bc.isValidHashesLocked() {
+		return false
+	}
+	if !bc.isValidTransactionsLocked() {
+		return false
+	}
+	return true
+}
+
+func (bc *Blockchain) IsValid() bool {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.isValidLocked()
 }
 
 func (bc *Blockchain) BalanceWithPending(addr string) int {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	balance := 0
-	for _, b := range bc.Blocks {
-		for _, tx := range b.Transactions {
-			if tx.To == addr {
-				balance += tx.Amount
-			}
-			if tx.From != "" && tx.From == addr {
-				balance -= tx.Amount
-			}
-		}
-	}
-	for _, tx := range bc.Pending {
-		if tx.From != "" && tx.From == addr {
-			balance -= tx.Amount
-		}
-		if tx.To == addr {
-			balance += tx.Amount
-		}
-	}
-	return balance
+	return bc.balanceWithPendingLocked(addr)
 }
 
 func (bc *Blockchain) balanceWithPendingLocked(addr string) int {
@@ -186,7 +202,11 @@ func (bc *Blockchain) SubmitTx(tx Tx) error {
 	if tx.Signature == "" {
 		return errors.New("signature cant be empty")
 	}
-	if Address([]byte(tx.PubKey)) != tx.From {
+	pubKeyBytes, err := hex.DecodeString(tx.PubKey)
+	if err != nil {
+		return err
+	}
+	if Address(pubKeyBytes) != tx.From {
 		return errors.New("pub key and address does not match")
 	}
 	if err := tx.VerifySignature(); err != nil {

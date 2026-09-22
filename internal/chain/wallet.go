@@ -32,9 +32,14 @@ func (w *Wallet) PubKeyHex() string {
 	return hex.EncodeToString(pubKeyBytes)
 }
 
-func Address(pubKeyHex []byte) string {
-	hash := sha256.Sum256(pubKeyHex)
+func Address(pubKeyBytes []byte) string {
+	hash := sha256.Sum256(pubKeyBytes)
 	return hex.EncodeToString(hash[:])
+}
+
+func (w *Wallet) Address() string {
+	pubKeyBytes, _ := w.PrivKey.PublicKey.Bytes()
+	return Address(pubKeyBytes)
 }
 
 func (w *Wallet) ToPem() ([]byte, error) {

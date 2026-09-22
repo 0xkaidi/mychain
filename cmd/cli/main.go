@@ -28,7 +28,8 @@ func doGet(path string) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Println("server returned:", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Println("server returned:", resp.StatusCode, string(body))
 		os.Exit(1)
 	}
 
@@ -37,7 +38,6 @@ func doGet(path string) {
 		fmt.Println("read failed:", err)
 		os.Exit(1)
 	}
-
 	fmt.Println(string(body))
 }
 
@@ -92,7 +92,7 @@ func cmdMine(args []string) {
 		os.Exit(1)
 	}
 
-	addr := chain.Address([]byte(w.PubKeyHex()))
+	addr := w.Address()
 
 	miner := api.MineRequest{Miner: addr}
 
@@ -135,7 +135,7 @@ func cmdSend(args []string) {
 		os.Exit(1)
 	}
 
-	tx := chain.Tx{From: chain.Address([]byte(w.PubKeyHex())), To: to, Amount: amount, PubKey: w.PubKeyHex()}
+	tx := chain.Tx{From: w.Address(), To: to, Amount: amount, PubKey: w.PubKeyHex()}
 
 	tx.Signature, err = chain.Sign(w.PrivKey, tx.SigningBytes())
 	if err != nil {
@@ -171,16 +171,16 @@ func cmdKeygen(args []string) {
 		fmt.Println("write key:", err)
 		os.Exit(1)
 	}
-	fmt.Println("address:", chain.Address([]byte(w.PubKeyHex())))
+	fmt.Println("address:", w.Address())
 	fmt.Println("save to:", *out)
 }
 
 func cmdInspect(args []string) {
 	fs := flag.NewFlagSet("inspect", flag.ExitOnError)
-	out := fs.String("key", defaultKeyPath, "path to save private key")
+	keypath := fs.String("key", defaultKeyPath, "path to save private key")
 	fs.Parse(args)
 
-	data, err := os.ReadFile(*out)
+	data, err := os.ReadFile(*keypath)
 	if err != nil {
 		fmt.Println("invalid file:", err)
 		os.Exit(1)
@@ -191,7 +191,7 @@ func cmdInspect(args []string) {
 		fmt.Println("invalid pem:", err)
 		os.Exit(1)
 	}
-	fmt.Println("address:", chain.Address([]byte(w.PubKeyHex())))
+	fmt.Println("address:", w.Address())
 	fmt.Println("pubkey:", w.PubKeyHex())
 }
 
@@ -216,8 +216,8 @@ func main() {
 	case "mine":
 		cmdMine(os.Args[2:])
 	case "send":
-		if len(os.Args) < 5 {
-			fmt.Println("usage: mychain send <from> <to> <amount>")
+		if len(os.Args) < 4 {
+			fmt.Println("usage: mychain send [from] <to> <amount>")
 			os.Exit(1)
 		}
 		cmdSend(os.Args[2:])
