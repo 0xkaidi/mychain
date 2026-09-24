@@ -13,6 +13,7 @@
 - 余额查询，支持把未确认交易计入余额
 - 链数据持久化到 `mychain-<port>.json`（每个端口一份），启动时完整校验：创世块、区块哈希与难度、每块恰好一笔 50 的 coinbase、每笔普通交易的地址/签名/余额，非法则拒绝启动
 - 并发安全（`sync.Mutex`），落盘失败会回滚区块并把交易退回交易池
+- 基础节点同步：每 10 秒从邻居拉取完整链，挖矿成功后广播完整链；仅接受更长且校验有效的链
 - 命令行工具 `cmd/cli`，通过 HTTP 调用节点接口
 
 ## 目录结构
@@ -26,7 +27,8 @@ internal/chain/transaction.go  交易结构与签名原文
 internal/chain/wallet.go    钱包、地址、PEM 读写
 internal/chain/crypto.go    ECDSA 签名/验签
 internal/chain/store.go     读写链文件
-internal/api/handler.go     HTTP 接口
+internal/api/handler.go     HTTP 接口（含 /sync）
+internal/p2p/sync.go        邻居节点、定时拉取与广播
 ```
 
 ## 运行
@@ -43,10 +45,41 @@ go run .
 
 ```bash
 go run . -port 8081                            # 换端口，链文件为 mychain-8081.json
-go run . -peers 127.0.0.1:8080,127.0.0.1:8082  # 声明邻居节点地址
+go run . -peers http://localhost:8081,http://localhost:8082  # 多个邻居用逗号分隔
 ```
 
-`-peers` 目前只会解析并在启动日志中打印，尚未实现节点间的区块/交易同步；不同端口的节点各自维护一条独立的链。
+`-peers` 支持 `http://host:port`，省略 `http://` 时会自动补全。不同端口使用独立的链文件，通过邻居同步更长的有效链；待打包交易暂不广播。
+
+### 启动两个节点
+
+分别在两个终端中运行（保持终端开启）：
+
+```bash
+# 终端 1
+go run . -port 8080 -peers http://localhost:8081
+
+# 终端 2
+go run . -port 8081 -peers http://localhost:8080
+```
+
+启动后程序应持续运行，不会立即返回命令提示符。HTTP 服务在主 goroutine 中阻塞，定时同步在后台运行。用第三个终端检查：
+
+```bash
+curl http://localhost:8080/blocks
+curl http://localhost:8081/blocks
+```
+
+节点每 10 秒拉取邻居的 `/blocks`，再提交给自身 `/sync`；通过 `/mine` 挖矿成功后也会向邻居广播完整链。
+
+### 同步日志说明
+
+`post to http://localhost:8080/sync : rejected` 表示本次链替换被拒绝，不代表启动失败。`/sync` 的 JSON 响应中包含 `reason`，但当前后台日志只打印 `status`：
+
+- `new chain is not longer`：对方链不比本地长（包括等长），无需替换，属于正常情况。
+- `new chain is invalid`：候选链未通过校验，需要排查数据。
+- 其他原因可能来自链文件保存失败。
+
+因此不能仅凭 `rejected` 判断链无效。相同长度的分叉目前不会自动解决；邻居尚未启动时出现连接失败，可在邻居启动后等待下一轮同步。
 
 编译（含 CLI）：
 
@@ -142,6 +175,20 @@ curl http://localhost:8080/valid
 # {"valid":true}
 ```
 
+### 同步链
+
+`POST /sync` 接收 JSON 对象，供节点间同步使用：
+
+- `blocks`：完整候选链，结构与 `/blocks` 返回的区块对象数组一致。
+- `difficulty`：候选链难度，目前为 `5`。
+
+仅当候选链比本地更长且校验通过时才替换并保存。
+
+- 接受：`{"status":"accepted"}`
+- 拒绝：`{"status":"rejected","reason":"new chain is not longer"}` 等
+
+接受和业务拒绝均返回 HTTP 200，调用方需要检查 `status`；JSON 解析失败返回 400，非 POST 请求返回 405。
+
 ## 说明
 
 - 链数据保存在 `mychain-<port>.json`，私钥为 `*.pem`，两者都已在 `.gitignore` 中忽略。
@@ -150,5 +197,5 @@ curl http://localhost:8080/valid
 - 区块哈希 = `sha256(prev_block_hash|timestamp|transactions|nonce)`，其中 `transactions` 为交易的 JSON 编码。
 - 创世区块中 1000 的初始余额记在字面地址 `genesis` 名下，没有对应私钥，因此无法花掉；新币只能通过挖矿奖励产生。
 - 地址是对未压缩 SEC1 公钥字节做 `sha256` 后的十六进制；节点用它校验交易的 `from` 与 `pub_key` 是否匹配。
-- 难度是常量 `chain.Difficulty = 5`，`mychain.json` 中记录的难度与之不一致时链会被判为非法。
+- 难度是常量 `chain.Difficulty = 5`，`mychain-<port>.json` 中记录的难度与之不一致时链会被判为非法。
 - CLI 的服务端地址目前硬编码在 `cmd/cli/main.go` 的 `baseURL`。

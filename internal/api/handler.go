@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"mychain/internal/chain"
+	"mychain/internal/p2p"
 )
 
 type ValidResponse struct {
@@ -13,6 +14,11 @@ type ValidResponse struct {
 
 type MineRequest struct {
 	Miner string `json:"miner"`
+}
+
+type SyncRequest struct {
+	Blocks     []*chain.Block `json:"blocks"`
+	Difficulty int            `json:"difficulty"`
 }
 
 func handleBlocks(bc *chain.Blockchain) http.HandlerFunc {
@@ -27,7 +33,7 @@ func handleBlocks(bc *chain.Blockchain) http.HandlerFunc {
 	}
 }
 
-func handleMine(bc *chain.Blockchain) http.HandlerFunc {
+func handleMine(bc *chain.Blockchain, node *p2p.Node) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -44,6 +50,7 @@ func handleMine(bc *chain.Blockchain) http.HandlerFunc {
 			http.Error(w, "mine failed", http.StatusBadRequest)
 			return
 		}
+		go node.Broadcast()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(b)
 	}
@@ -92,14 +99,37 @@ func handleValid(bc *chain.Blockchain) http.HandlerFunc {
 	}
 }
 
-func NewMux(bc *chain.Blockchain) *http.ServeMux {
+func handleSync(bc *chain.Blockchain) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+		var req SyncRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := bc.ReplaceChain(req.Blocks, req.Difficulty); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"status": "rejected", "reason": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	}
+}
+
+func NewMux(bc *chain.Blockchain, node *p2p.Node) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/blocks", handleBlocks(bc))
-	mux.HandleFunc("/mine", handleMine(bc))
+	mux.HandleFunc("/mine", handleMine(bc, node))
 	mux.HandleFunc("/transaction", handleTransaction(bc))
 	mux.HandleFunc("GET /balance/{address}", handleBalance(bc))
 	mux.HandleFunc("/valid", handleValid(bc))
+	mux.HandleFunc("/sync", handleSync(bc))
 
 	return mux
 }

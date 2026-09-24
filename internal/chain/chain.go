@@ -35,6 +35,12 @@ func (bc *Blockchain) GetBlocks() []*Block {
 	return blocks
 }
 
+func (bc *Blockchain) GetDifficulty() int {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.Difficulty
+}
+
 func (bc *Blockchain) addBlock(tx []Tx) (*Block, error) {
 	for {
 		bc.mu.Lock()
@@ -239,4 +245,23 @@ func (bc *Blockchain) Mine(miner string) (*Block, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+func (bc *Blockchain) ReplaceChain(blocks []*Block, difficulty int) error {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	if len(bc.Blocks) >= len(blocks) {
+		return errors.New("new chain is not longer")
+	}
+
+	tmp := Blockchain{Blocks: blocks, Difficulty: difficulty}
+	if !tmp.isValidLocked() {
+		return errors.New("new chain is invalid")
+	}
+
+	bc.Blocks = blocks
+	bc.Difficulty = difficulty
+
+	return saveToFileLocked(bc)
 }

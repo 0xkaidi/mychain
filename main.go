@@ -6,9 +6,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"mychain/internal/api"
 	"mychain/internal/chain"
+	"mychain/internal/p2p"
 )
 
 func parsePeers(s string) []string {
@@ -19,9 +21,13 @@ func parsePeers(s string) []string {
 	peers := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p != "" {
-			peers = append(peers, p)
+		if p == "" {
+			continue
 		}
+		if !strings.HasPrefix(p, "http://") {
+			p = "http://" + p
+		}
+		peers = append(peers, p)
 	}
 	return peers
 }
@@ -46,7 +52,12 @@ func main() {
 		}
 	}
 
-	mux := api.NewMux(bc)
+	selfURL := "http://localhost:" + *port
+	node := p2p.NewNode(selfURL, peers, bc)
+
+	mux := api.NewMux(bc, node)
+
+	node.StartPeriodicSync(10 * time.Second)
 
 	log.Printf("listening on: %s, peers: %v", *port, peers)
 	log.Fatal(http.ListenAndServe(":"+*port, mux))
