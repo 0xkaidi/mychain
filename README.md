@@ -11,7 +11,7 @@
 - 挖矿奖励：每个区块附带一笔 50 的 coinbase 交易给矿工
 - SHA-256 计算区块哈希，通过前导零数量控制难度（固定为 5）
 - 余额查询，支持把未确认交易计入余额
-- 链数据持久化到 `mychain.json`，启动时完整校验：创世块、区块哈希与难度、每块恰好一笔 50 的 coinbase、每笔普通交易的地址/签名/余额，非法则拒绝启动
+- 链数据持久化到 `mychain-<port>.json`（每个端口一份），启动时完整校验：创世块、区块哈希与难度、每块恰好一笔 50 的 coinbase、每笔普通交易的地址/签名/余额，非法则拒绝启动
 - 并发安全（`sync.Mutex`），落盘失败会回滚区块并把交易退回交易池
 - 命令行工具 `cmd/cli`，通过 HTTP 调用节点接口
 
@@ -25,7 +25,7 @@ internal/chain/chain.go     链逻辑：交易池、提交交易、挖矿、余�
 internal/chain/transaction.go  交易结构与签名原文
 internal/chain/wallet.go    钱包、地址、PEM 读写
 internal/chain/crypto.go    ECDSA 签名/验签
-internal/chain/store.go     读写 mychain.json
+internal/chain/store.go     读写链文件
 internal/api/handler.go     HTTP 接口
 ```
 
@@ -37,7 +37,16 @@ internal/api/handler.go     HTTP 接口
 go run .
 ```
 
-默认监听 `:8080`。首次启动会自动创建创世区块（难度 5，含一笔 `"" → genesis` 的 1000 初始交易）并写入 `mychain.json`。
+默认监听 `:8080`，链文件为 `mychain-<port>.json`（默认即 `mychain-8080.json`）。首次启动会自动创建创世区块（难度 5，含一笔 `"" → genesis` 的 1000 初始交易）并写入该文件。
+
+可用参数：
+
+```bash
+go run . -port 8081                            # 换端口，链文件为 mychain-8081.json
+go run . -peers 127.0.0.1:8080,127.0.0.1:8082  # 声明邻居节点地址
+```
+
+`-peers` 目前只会解析并在启动日志中打印，尚未实现节点间的区块/交易同步；不同端口的节点各自维护一条独立的链。
 
 编译（含 CLI）：
 
@@ -98,7 +107,7 @@ curl -X POST http://localhost:8080/transaction \
 # {"status":"accepted"}
 ```
 
-校验失败会返回 400，例如 `insufficient balance`、`pub key and address does not match`、
+校验失败会返回 400，例如 `amount should > 0`、`insufficient balance`、`pub key and address does not match`、
 `signature cant be empty`、`verify failed: invalid signature`。
 
 ### 挖矿（打包交易池中的交易）
@@ -135,7 +144,8 @@ curl http://localhost:8080/valid
 
 ## 说明
 
-- 链数据保存在 `mychain.json`，私钥为 `*.pem`，两者都已在 `.gitignore` 中忽略。
+- 链数据保存在 `mychain-<port>.json`，私钥为 `*.pem`，两者都已在 `.gitignore` 中忽略。
+- 链文件名带端口号：旧版的 `mychain.json` 不会再被读取，需要用时手动改名为 `mychain-8080.json`。
 - 交易池只存在内存中，重启后未打包的交易会丢失（已确认的区块不受影响）。
 - 区块哈希 = `sha256(prev_block_hash|timestamp|transactions|nonce)`，其中 `transactions` 为交易的 JSON 编码。
 - 创世区块中 1000 的初始余额记在字面地址 `genesis` 名下，没有对应私钥，因此无法花掉；新币只能通过挖矿奖励产生。
