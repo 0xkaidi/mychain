@@ -196,6 +196,9 @@ func (bc *Blockchain) SubmitTx(tx Tx) error {
 	if tx.From == "" {
 		return errors.New("from cant be empty")
 	}
+	if tx.Amount <= 0 {
+		return errors.New("amount should > 0")
+	}
 	if tx.PubKey == "" {
 		return errors.New("pub key cant be empty")
 	}
